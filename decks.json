@@ -1,7 +1,7 @@
 {
  "Deck Tétali": {
   "slug": "tetali",
-  "date": 1794426104.5351157,
+  "date": 1794430614.2907712,
   "version": "1.7.2",
   "resume": {
    "alertes": {},
@@ -20,8 +20,8 @@
     "R"
    ],
    "image_cmd": "https://cards.scryfall.io/normal/front/5/e/5ed1070d-fc21-4f4c-8e6e-5e4a2e6e2dce.jpg?1783926206",
-   "maybe": 0,
-   "modifie": 1794425553.2785137,
+   "maybe": 4,
+   "modifie": 1794430464.3209455,
    "note": "",
    "prix_total": 211.65,
    "titre": "Tétali",
@@ -300,6 +300,22 @@
    [
     "Mountain",
     "Montagne"
+   ],
+   [
+    "Valakut Exploration",
+    "Exploration de Valakut"
+   ],
+   [
+    "Plargg and Nassari",
+    "Plargg et Nassari"
+   ],
+   [
+    "Outpost Siege",
+    "Siège de l'avant-poste"
+   ],
+   [
+    "Akki Battle Squad",
+    "Escouade de combat akki"
    ]
   ]
  }
