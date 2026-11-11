@@ -1,7 +1,7 @@
 {
  "Deck Tétali": {
   "slug": "tetali",
-  "date": 1794430614.2907712,
+  "date": 1794430984.144321,
   "version": "1.7.2",
   "resume": {
    "alertes": {},
@@ -20,8 +20,8 @@
     "R"
    ],
    "image_cmd": "https://cards.scryfall.io/normal/front/5/e/5ed1070d-fc21-4f4c-8e6e-5e4a2e6e2dce.jpg?1783926206",
-   "maybe": 4,
-   "modifie": 1794430464.3209455,
+   "maybe": 5,
+   "modifie": 1794430856.9047208,
    "note": "",
    "prix_total": 211.65,
    "titre": "Tétali",
@@ -316,6 +316,10 @@
    [
     "Akki Battle Squad",
     "Escouade de combat akki"
+   ],
+   [
+    "Hellkite Charger",
+    "Batailleur escouflenfer"
    ]
   ]
  }
