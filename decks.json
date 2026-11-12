@@ -1,11 +1,11 @@
 {
  "Deck Tétali": {
   "slug": "tetali",
-  "date": 1794430984.144321,
-  "version": "1.7.2",
+  "date": 1794490804.0200098,
+  "version": "1.7.6",
   "resume": {
    "alertes": {},
-   "art": "https://cards.scryfall.io/art_crop/front/5/e/5ed1070d-fc21-4f4c-8e6e-5e4a2e6e2dce.jpg?1783926206",
+   "art": "https://cards.scryfall.io/art_crop/front/a/e/ae91f293-572c-4b80-b6f7-792cb42d1a67.jpg?1782874536",
    "bracket": 2,
    "bracket_raisons": [
     "aucun Game Changer, aucune combo infinie à 2 cartes : bracket 2 (ou 1 si le deck est très décontracté)"
@@ -19,11 +19,11 @@
    "identite": [
     "R"
    ],
-   "image_cmd": "https://cards.scryfall.io/normal/front/5/e/5ed1070d-fc21-4f4c-8e6e-5e4a2e6e2dce.jpg?1783926206",
+   "image_cmd": "https://cards.scryfall.io/normal/front/a/e/ae91f293-572c-4b80-b6f7-792cb42d1a67.jpg?1782874536",
    "maybe": 5,
-   "modifie": 1794430856.9047208,
+   "modifie": 1794431989.055171,
    "note": "",
-   "prix_total": 211.65,
+   "prix_total": 229.95,
    "titre": "Tétali",
    "total": 100,
    "trop_cher": [

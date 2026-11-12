@@ -138,6 +138,8 @@ const ICONES = {
   compacter: '<path d="M4 14h6v6M20 10h-6V4"/><path d="m14 10 7-7M3 21l7-7"/>',
   ouvrir: '<path d="M14 4h6v6M20 4l-9 9"/><path d="M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>',
   telecharger: '<path d="M12 4v11"/><path d="m7 10 5 5 5-5"/><path d="M5 20h14"/>',
+  nuage: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
+  imprimer: '<path d="M6 9V3h12v6"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><path d="M6 14h12v7H6z"/>',
   coche: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   moins: '<path d="M5 12h14"/>',
   terminal: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7.5 9.5 3 2.5-3 2.5M13 15h4"/>',
@@ -388,11 +390,13 @@ const APERCUS = new Map();                         // nom anglais -> promesse de
 const minuscules = (s) => s.toLowerCase().replace(/[’‘]/g, "'");
 const LETTRE = /[\p{L}\p{N}]/u;
 const SANS_CITE = "script, style, textarea, input, select, option, code, pre, svg, h1, h2, .fil, .nc, [data-apercu], [data-image], "
-  + "[data-survol], [data-survol-r], .fs-texte, .texte, .fc-tete, .fiche, .moteur, #apercu, #bulle, #fiche-survol, #toast, #menu, [contenteditable]";
+  + "[data-survol], [data-survol-r], .fs-texte, .texte, .fc-tete, .fiche, .moteur, #apercu, #bulle, #fiche-survol, #toast, #menu, [contenteditable], "
+  + ".px-carte";                                     // les proxies s'impriment : pas de liens soulignés
 
 function apercuCite(el) {
   const nom = el.dataset.apercu;
   const remplir = (f) => {
+    if (f === undefined) return;                     // pas de réponse : on redemandera au prochain survol
     if (!f || !f.image) { el.dataset.image = ""; return; }
     const autre = sansAccent(el.textContent.trim()) === sansAccent(f.fr) ? f.nom : f.fr || f.nom;     // l'autre langue
     el.dataset.image = f.image;
@@ -401,7 +405,7 @@ function apercuCite(el) {
   };
   const c = etat.deck && etat.deck.cartes.find((x) => x.nom === nom);        // carte du deck : la version choisie
   if (c && c.info && c.info.image) { remplir({ nom: c.nom, fr: c.info.fr, image: c.info.image, prix: c.info.prix }); return Promise.resolve(); }
-  if (!APERCUS.has(nom)) APERCUS.set(nom, api(`/api/apercu-carte?nom=${enc(nom)}`).catch(() => null));
+  if (!APERCUS.has(nom)) APERCUS.set(nom, api(`/api/apercu-carte?nom=${enc(nom)}`).catch(() => { APERCUS.delete(nom); }));
   return APERCUS.get(nom).then(remplir);
 }
 
@@ -525,7 +529,7 @@ function passeCites() {
 
 async function chargerCites() {
   const r = await api("/api/noms-cartes").catch(() => null);
-  if (!r || !r.noms.length) { if (!PARTAGE) setTimeout(chargerCites, 10000); return; }      // base de cartes en cours de chargement
+  if (!r || !(r.noms || []).length) { if (!PARTAGE) setTimeout(chargerCites, 3000); return; }      // base de cartes en construction
   const cles = new Map(), index = new Map();
   for (const [en] of r.noms) indexerNom(cles, index, en, en);
   for (const [en, fr] of r.noms) if (fr) indexerNom(cles, index, fr, en);
@@ -608,6 +612,8 @@ function majTitre() {
     t = ["Recherche", p.get("nom") && `« ${p.get("nom")} »`, (p.get("deck") || "").replace(/^Deck /, "")].filter(Boolean).join(" · ");
   } else if (parts[0] === "options") {
     t = "Options";
+  } else if (parts[0] === "proxies") {
+    t = "Proxies · " + (new URLSearchParams(qs || "").get("deck") || "").replace(/^Deck /, "");
   }
   document.title = t + " — Atelier MTG";
 }
@@ -621,8 +627,9 @@ async function route() {
   const parts = chemin.split("/");
   $("#lien-recherche").classList.toggle("actif", parts[0] === "recherche" && !new URLSearchParams(qs || "").get("deck"));   // pour un deck : son bandeau
   $("#lien-options").classList.toggle("actif", parts[0] === "options");
-  vue.classList.toggle("vue-large", parts[0] === "recherche" || parts[0] === "options");
+  vue.classList.toggle("vue-large", parts[0] === "recherche" || parts[0] === "options" || parts[0] === "proxies");
   vue.classList.remove("vue-pleine");                       // la page « C'est quoi » la remet : son en-tête prend toute la largeur
+  document.body.classList.toggle("impression", parts[0] === "proxies");   // à l'impression, rien d'autre que les feuilles
   try {
     if (PARTAGE && parts[0] === "a-propos" && PARTAGE.page !== "a-propos")                              // ancienne adresse
       location.replace(A_PROPOS + (parts[1] === "installation" ? "#installation" : ""));
@@ -634,12 +641,13 @@ async function route() {
     else if (PARTAGE && parts[0] === "deck" && parts[1]) location.replace(lienDeck(decodeURIComponent(parts[1])));
     else if (parts[0] === "recherche") await vueRecherche(new URLSearchParams(qs || ""));
     else if (!PARTAGE && parts[0] === "options") await vueOptions();
+    else if (!PARTAGE && parts[0] === "proxies") await vueProxies(new URLSearchParams(qs || ""));
     else if (parts[0] === "deck" && parts[1]) await vueDeck(decodeURIComponent(parts[1]), parts[2] || "liste", parts[3] ? decodeURIComponent(parts[3]) : null);
     else await vueAccueil();
   } catch (e) {
     vue.innerHTML = `<p class="erreur">${esc(e.message || e)}</p>`;
   }
-  majTitre();                                      // l'adresse a pu être complétée (dernière recherche reprise)
+  majTitre();                                      // la vue a pu compléter l'adresse
 }
 window.addEventListener("hashchange", route);
 
@@ -769,11 +777,33 @@ async function vueAccueil() {
   const [ds, corbeille] = await Promise.all([api("/api/decks"), api("/api/corbeille")]);
   etat.decks = ds;
   etat.couleurs ||= [];
+  const decksSupprimes = corbeille.length ? `
+      <details class="panneau"><summary>Decks supprimés (${corbeille.length})</summary>
+        <table class="tableau" style="margin-top:.6rem"><tbody>
+          ${corbeille.map((c, i) => `<tr><td><strong>${esc(c.nom.replace(/^Deck /, ""))}</strong> <span class="muet petit">supprimé le ${esc(c.date)}</span></td>
+            <td class="num"><button class="btn btn-petit" data-recup="${i}">${ico("annuler")}Récupérer</button></td></tr>`).join("")}
+        </tbody></table>
+      </details>` : "";
+  if (!ds.length && !PARTAGE) {                    // premier lancement, ou nouveau PC : les deux façons de commencer
+    vue.innerHTML = `<div class="titre-page"><h1>${esc(MES_DECKS)}</h1></div>
+      <div class="accueil-vide">
+        <button type="button" class="av-choix" id="av-creer">${ico("plus")}<strong>Créer mon premier deck</strong>
+          <span>À partir de son commandant, ou d'une liste copiée depuis Moxfield, Archidekt ou MTG Arena.</span></button>
+        <button type="button" class="av-choix" id="av-recuperer">${ico("nuage")}<strong>Récupérer mes decks</strong>
+          <span>Tu les as sauvegardés en ligne depuis un autre PC.</span></button>
+      </div>${decksSupprimes}`;
+    $("#av-creer").onclick = modaleNouveauDeck;
+    $("#av-recuperer").onclick = () => modaleSauvegarde("recuperer", () => route());
+    brancherCorbeille(corbeille);
+    return;
+  }
   vue.innerHTML = `
     <div class="titre-page">
       <h1>${esc(MES_DECKS)}</h1>
+      <span id="etat-sauvegarde"></span>
       <button class="btn btn-accent ecrit" id="btn-nouveau">${ico("plus")}Nouveau deck</button>
     </div>
+    <div id="bandeau-sauvegarde"></div>
     <div class="barre-outils">
       <input class="champ filtre" id="d-filtre" type="search" placeholder="Chercher un deck, un commandant ou une carte…" value="${esc(etat.filtreDecks || "")}" aria-label="Chercher un deck">
       <span class="outil"><span class="petit muet">Couleurs</span>
@@ -785,14 +815,9 @@ async function vueAccueil() {
       ${segments("vue-decks", [["grille", "Grille", "grille"], ["liste", "Liste", "liste"]], "grille")}
     </div>
     <div id="d-resultats"></div>
-    ${corbeille.length ? `
-      <details class="panneau"><summary>Decks supprimés (${corbeille.length})</summary>
-        <table class="tableau" style="margin-top:.6rem"><tbody>
-          ${corbeille.map((c, i) => `<tr><td><strong>${esc(c.nom.replace(/^Deck /, ""))}</strong> <span class="muet petit">supprimé le ${esc(c.date)}</span></td>
-            <td class="num"><button class="btn btn-petit" data-recup="${i}">${ico("annuler")}Récupérer</button></td></tr>`).join("")}
-        </tbody></table>
-      </details>` : ""}`;
+    ${decksSupprimes}`;
   $("#btn-nouveau").onclick = modaleNouveauDeck;
+  if (!PARTAGE) etatSauvegarde($("#etat-sauvegarde"), $("#bandeau-sauvegarde"));
   const zone = $("#d-resultats");
   let cartes = {}, numero = 0, minuteur;
   const rendre = () => rendreDecks(zone, cartes);
@@ -830,6 +855,10 @@ async function vueAccueil() {
     const tr = ev.target.closest("tr[data-deck]");
     if (tr && !ev.target.closest("a")) location.href = lienDeck(tr.dataset.deck);
   });
+  brancherCorbeille(corbeille);
+}
+
+function brancherCorbeille(corbeille) {
   $$("[data-recup]").forEach((b) => b.addEventListener("click", async () => {
     try {
       const r = await api("/api/corbeille/recuperer", { method: "POST", body: { fichier: corbeille[+b.dataset.recup].fichier } });
@@ -989,7 +1018,8 @@ async function vueDeck(id, onglet, extra = null, donnees = null) {
   $("#btn-ajouter").onclick = () => modaleAjout();
   $$(".cmd-entete").forEach((x) => { x.onclick = () => ouvrirCarte(d.cartes[+x.dataset.carte]); });
   $("#btn-deck-menu").onclick = (ev) => ouvrirMenu(ev.currentTarget, [
-    ...(PARTAGE ? [] : [["Partager le deck…", () => modalePartage(d), "", "partager"], null]),
+    ...(PARTAGE ? [] : [["Partager le deck…", () => modalePartage(d), "", "partager"],
+      ["Imprimer les proxies…", () => { location.hash = `#/proxies?deck=${enc(d.id)}`; }, "", "imprimer"], null]),
     "Copier la liste pour",
     ...EXPORTS.map(([fmt, lib]) => [lib, () => copierListe(fmt, lib), "", "copier"]),
     ...(PARTAGE ? [] : [["Cardmarket (à acheter)", () => copierCardmarket(d), "", "panier"]]),
@@ -1316,6 +1346,103 @@ async function copierCardmarket(d) {
   } catch (e) { erreur(e); }
 }
 
+// ------------------------------------------------------------------ proxies à imprimer (menu « … » du deck)
+// Comme la « Machine à Proxies » de Magic-Ville : en texte (nom, coût, type, texte, force et endurance, en noir et blanc :
+// peu d'encre) ou en images (la version choisie dans le deck, verso compris). 9 cartes par page A4, à la taille réelle,
+// bord à bord pour couper d'un trait. Les images ne sont ni recadrées, ni déformées, ni décolorées (règles de Scryfall).
+const PROXIES_PAR_PAGE = 9;
+
+// les cartes à imprimer : celles à acheter, ou tout le deck (sans le Maybeboard), avec ou sans les terrains de base
+function proxiesDuDeck(d, poss, cartes, bases) {
+  const garde = (c) => bases || !estBase(c);
+  const l = cartes === "acheter" ? bilanAchats(d, poss).acheter.filter((x) => garde(x.c))
+    : d.cartes.filter((c) => c.cat !== "Maybeboard" && garde(c)).map((c) => ({ c, n: c.n }));
+  return l.sort((a, b) => (b.c.cat === "Commander") - (a.c.cat === "Commander") || nomAffiche(a.c).localeCompare(nomAffiche(b.c), "fr"));
+}
+
+// une carte en texte : chaque face (« Recto // Verso ») avec son nom, son coût, son type, son texte et sa force
+function proxyTexte(c, langue) {
+  const i = c.info, fr = langue === "fr";
+  const faces = (t) => String(t || "").split(" // ");
+  const noms = faces(fr ? i.fr || c.nom : c.nom), types = faces(fr ? i.fr_type || i.type : i.type);
+  if (!fr && types.length === 1 && i.dos && i.dos.type) types.push(i.dos.type);      // le type du verso, connu en anglais seulement
+  const textes = String((fr ? i.fr_texte || i.texte : i.texte) || "").split(/\n\/\/\n/);
+  const couts = faces(i.cout), forces = faces(i.pt);
+  const n = Math.max(noms.length, textes.length);
+  const face = (k) => `<div class="px-face">
+      <div class="px-tete"><span class="px-nom">${esc(noms[k] || "")}</span>${couts[k] ? mana(couts[k]) : ""}</div>
+      <div class="px-type">${esc(types[k] || "")}</div>
+      <div class="px-regles">${(textes[k] || "").split("\n").filter((l) => l.trim()).map((l) => `<p>${texteMana(l)}</p>`).join("")}</div>
+      ${forces[k] ? `<div class="px-force">${esc(forces[k].replace(/^loyauté /, fr ? "Loyauté " : "Loyalty "))}</div>` : ""}
+    </div>`;
+  return `<div class="px-carte px-texte">${Array.from({ length: n }, (_, k) => face(k)).join("")}</div>`;
+}
+
+// une carte en images : celle de la version choisie dans le deck, en grand ; une carte à deux faces donne aussi son verso
+// (même impression : l'adresse du verso est celle du recto, « back » au lieu de « front »)
+function proxyImages(c) {
+  const grande = (u) => String(u || "").replace(/\/(normal|small)\//, "/large/");
+  const recto = grande(c.info.image);
+  const verso = !c.info.dos ? "" : recto.includes("/front/") ? recto.replace("/front/", "/back/") : grande(c.info.dos.image);
+  return [recto, verso].filter(Boolean).map((u) => `<div class="px-carte px-image"><img src="${esc(u)}" alt=""></div>`);
+}
+
+// un texte trop long pour sa carte : la police rétrécit jusqu'à ce qu'il tienne (comme les cartes à beaucoup de texte)
+function ajusterProxies(el) {
+  for (const f of $$(".px-texte", el)) {
+    let t = 8.4;
+    f.style.setProperty("--px-taille", t + "pt");
+    while (f.scrollHeight > f.clientHeight + 1 && t > 5) {
+      t -= 0.3;
+      f.style.setProperty("--px-taille", t + "pt");
+    }
+  }
+}
+
+async function vueProxies(p) {
+  const id = p.get("deck");
+  vue.innerHTML = `<p class="chargement">Préparation des proxies…</p>`;
+  const [d, poss] = await Promise.all([api(`/api/decks/${enc(id)}`),
+    api(`/api/decks/${enc(id)}/achats`).then((r) => r.possedees).catch(() => ({}))]);
+  const compte = (cartes, bases) => nbAchats(proxiesDuDeck(d, poss, cartes, bases));
+  let cartes = compte("acheter", PREF.get("proxies-bases", "") === "1") ? "acheter" : "tout";
+  const rendre = () => {
+    const format = PREF.get("proxies-format", "texte"), langue = PREF.get("proxies-langue", "fr"), bases = PREF.get("proxies-bases", "") === "1";
+    const proxies = proxiesDuDeck(d, poss, cartes, bases).flatMap(({ c, n }) =>
+      Array.from({ length: n }, () => (format === "images" ? proxyImages(c) : [proxyTexte(c, langue)])).flat());
+    const pages = [];
+    for (let i = 0; i < proxies.length; i += PROXIES_PAR_PAGE) pages.push(proxies.slice(i, i + PROXIES_PAR_PAGE));
+    vue.innerHTML = `<div class="px-outils">
+        <nav class="fil" aria-label="Fil d'Ariane"><a href="#/">Mes decks</a><span aria-hidden="true">›</span><a href="${esc(lienDeck(d.id))}">${esc(d.titre)}</a><span aria-hidden="true">›</span><span aria-current="page">Proxies</span></nav>
+        <div class="px-reglages">
+          ${segments("proxies-format", [["texte", "Texte", "liste"], ["images", "Images", "cartes"]], "texte")}
+          ${format === "texte" ? segments("proxies-langue", [["fr", "Français"], ["en", "Anglais"]], "fr") : ""}
+          <select class="champ champ-petit" id="px-cartes" aria-label="Cartes à imprimer">
+            <option value="acheter" ${cartes === "acheter" ? "selected" : ""}>Les cartes à acheter (${compte("acheter", bases)})</option>
+            <option value="tout" ${cartes === "tout" ? "selected" : ""}>Tout le deck (${compte("tout", bases)})</option></select>
+          <label class="petit"><input type="checkbox" id="px-bases" ${bases ? "checked" : ""}> Terrains de base</label>
+          <span class="px-compte muet petit">${proxies.length} proxie${proxies.length > 1 ? "s" : ""} · ${pages.length} page${pages.length > 1 ? "s" : ""} A4</span>
+          <button class="btn btn-accent" id="px-imprimer" ${proxies.length ? "" : "disabled"}>${ico("imprimer")}Imprimer</button>
+        </div>
+      </div>
+      ${pages.length ? `<div class="px-feuilles">${pages.map((pg) => `<section class="px-feuille"><div class="px-grille">${pg.join("")}</div></section>`).join("")}</div>`
+        : `<p class="muet">Aucune carte à imprimer.</p>`}`;
+    $$("img", vue).forEach((im) => { im.loading = "eager"; });          // toutes chargées avant l'impression
+    if (format === "texte") ajusterProxies(vue);
+    $$(".px-reglages .segments button", vue).forEach((b) => b.addEventListener("click", () => { PREF.set(b.dataset.pref, b.dataset.val); rendre(); }));
+    $("#px-cartes", vue).onchange = (ev) => { cartes = ev.target.value; rendre(); };
+    $("#px-bases", vue).onchange = (ev) => { PREF.set("proxies-bases", ev.target.checked ? "1" : ""); rendre(); };
+    $("#px-imprimer", vue).onclick = async (ev) => {
+      const b = ev.currentTarget;
+      b.disabled = true;
+      await Promise.all($$(".px-feuilles img", vue).map((im) => (im.complete ? null : new Promise((ok) => { im.onload = im.onerror = ok; }))));
+      b.disabled = false;
+      print();
+    };
+  };
+  rendre();
+}
+
 // fiche d'une carte : « Je l'ai » ou « À acheter », un clic pour passer de l'un à l'autre
 function boutonAchat(b, d, c, poss) {
   const n = besoinCarte(d, c), j = jAi(c, poss, n);
@@ -1416,21 +1543,64 @@ function modalePartage(d) {
       zone.innerHTML = `<p class="chargement">Publication…</p>`;
       try { rendre(await api(`/api/decks/${enc(d.id)}/partage`, { method: "POST" })); toast("Publié : en ligne d'ici une minute ou deux.", 4000); }
       catch (e) {
-        if (e.statut === 401) {
-          zone.innerHTML = `<p>${esc(e.message)}</p>
-            <div class="gh-action"><button class="btn btn-accent" id="gh-connecter">Se connecter à GitHub</button></div>`;
-          $("#gh-connecter", zone).onclick = () => connexionGithub(zone, publier);
-        }
+        if (e.statut === 401) introGithub(zone, publier, "partage");
         else zone.innerHTML = `<p class="erreur">${esc(e.message)}</p>`;
       }
     };
+    // premier partage : ce qui sera visible de tous, et ce qui ne l'est pas, avant de publier
+    const avant = () => {
+      zone.innerHTML = `<p>La page de <strong>${esc(d.titre)}</strong> sera publique : toute personne qui a le lien y voit
+          la liste, les statistiques, les combos et les tests du deck.</p>
+        <p class="muet petit">Pas ton classeur, ni tes achats, ni tes discussions avec Claude. La page se met à jour toute seule quand le deck change.</p>
+        <div class="boutons"><button class="btn btn-accent" id="pt-publier">${ico("partager")}Publier la page</button></div>`;
+      $("#pt-publier", zone).onclick = publier;
+    };
     const s = await api(`/api/decks/${enc(d.id)}/partage`).catch(() => ({}));
-    if (s.url) rendre(s); else publier();
+    if (s.url) rendre(s); else avant();
   }, { focus: false });
 }
 
-// partage sans git : se connecter à GitHub par un code (github.py). Le code s'affiche tout de suite, avec les trois
-// gestes à faire sur github.com ; la page suit GitHub et appelle suite(compte) une fois connecté
+// ce qu'est GitHub et à quoi il sert, pour qui n'en a jamais entendu parler : avant toute connexion (sauvegarde,
+// récupération, partage, Options). Avec ou sans compte, on arrive à connexionGithub
+function introGithub(zone, suite, contexte = "") {
+  const pourquoi = {
+    sauvegarde: "Pour sauvegarder tes decks, l'Atelier passe par GitHub.",
+    recuperer: "Ta sauvegarde est sur GitHub : connecte l'Atelier au compte GitHub de ton autre PC.",
+    partage: "Pour publier la page de ton deck, l'Atelier passe par GitHub.",
+  }[contexte];
+  const connecter = () => connexionGithub(zone, suite);
+  zone.innerHTML = `${pourquoi ? `<p class="gh-contexte">${pourquoi}</p>` : ""}
+    <div class="gh-presente">
+      <p><strong>GitHub</strong> est un service gratuit de Microsoft qui garde des fichiers en ligne. L'Atelier s'en sert pour deux choses :</p>
+      <ul class="gh-usages">
+        <li>${ico("nuage")}<span><strong>Sauvegarder tes decks</strong> dans un espace privé, que toi seul vois : tu les retrouves si ton PC tombe en panne, ou sur un autre PC.</span></li>
+        <li>${ico("partager")}<span><strong>Publier les decks que tu partages</strong>, sur une page à envoyer à ton groupe de jeu.</span></li>
+      </ul>
+    </div>
+    <p class="gh-compte">Il faut un compte GitHub : gratuit, avec une adresse e-mail.</p>
+    <div class="boutons">
+      <a class="btn" id="gh-creer" href="https://github.com/signup" target="_blank" rel="noopener">${ico("ouvrir")}Créer un compte</a>
+      <button class="btn btn-accent" id="gh-suite">J'ai un compte : me connecter</button>
+    </div>`;
+  $("#gh-suite", zone).onclick = connecter;
+  $("#gh-creer", zone).addEventListener("click", () => setTimeout(() => {   // le compte se crée dans l'onglet ouvert
+    zone.innerHTML = `<p>Crée ton compte sur la page de GitHub qui vient de s'ouvrir, puis reviens ici.</p>
+      <p class="muet petit">Ton nom d'utilisateur GitHub apparaîtra dans l'adresse des decks que tu partageras.</p>
+      <div class="boutons"><button class="btn btn-accent" id="gh-suite">Mon compte est créé : me connecter</button></div>`;
+    $("#gh-suite", zone).onclick = connecter;
+  }, 300));
+}
+
+// connecté avant la sauvegarde : GitHub n'a ouvert que les dépôts publics, il faut un nouveau code
+function autoriserGithub(zone, suite) {
+  zone.innerHTML = `<p>La sauvegarde va dans un espace privé de ton compte GitHub. Pour y écrire, l'Atelier a besoin
+      d'une autorisation de plus : un nouveau code, comme à ta première connexion.</p>
+    <div class="boutons"><button class="btn btn-accent" id="gh-suite">Continuer</button></div>`;
+  $("#gh-suite", zone).onclick = () => connexionGithub(zone, suite);
+}
+
+// se connecter à GitHub par un code (github.py). Le code s'affiche tout de suite, avec les trois gestes à faire sur
+// github.com ; la page suit GitHub et appelle suite(compte) une fois connecté
 async function connexionGithub(zone, suite) {
   zone.innerHTML = `<p class="chargement">Demande d'un code à GitHub…</p>`;
   let c;
@@ -1441,14 +1611,13 @@ async function connexionGithub(zone, suite) {
     $("#gh-encore", zone).onclick = () => connexionGithub(zone, suite);
     return;
   }
-  // GitHub ne dit rien à qui n'est pas développeur : pourquoi lui, et qu'un compte gratuit suffit
-  zone.innerHTML = `<p class="gh-pourquoi">GitHub, un service gratuit, héberge les pages de tes decks. Pas encore de compte ?
-      La page de GitHub propose d'en créer un.</p>
-    <ol class="gh-etapes">
+  // l'écran d'autorisation de GitHub parle de « dépôts publics et privés » : dit avant, il n'inquiète pas
+  zone.innerHTML = `<ol class="gh-etapes">
       <li><p class="gh-code" aria-label="Code de connexion">${esc(c.code)}</p>
         <a class="btn btn-accent" id="gh-ouvrir" href="${esc(c.url)}" target="_blank" rel="noopener">${ico("copier")}Copier le code et ouvrir GitHub</a></li>
-      <li>Sur GitHub, colle le code (Ctrl+V), puis clique sur « Continue ».</li>
-      <li>Clique sur « Authorize Atelier MTG », puis reviens ici.</li>
+      <li>Sur GitHub, connecte-toi si besoin, colle le code (Ctrl+V), puis clique sur «&nbsp;Continue&nbsp;».</li>
+      <li>GitHub te montre ce que l'Atelier pourra faire : écrire dans tes dépôts, les dossiers de ton compte. C'est là
+        qu'il range ta sauvegarde et tes pages. Clique sur «&nbsp;Authorize Atelier MTG&nbsp;», puis reviens ici.</li>
     </ol>
     <p class="gh-attente" role="status">En attente de GitHub…</p>`;
   $("#gh-ouvrir", zone).onclick = () => { navigator.clipboard.writeText(c.code).catch(() => {}); };
@@ -1465,14 +1634,96 @@ async function connexionGithub(zone, suite) {
   }
 }
 
-// la même chose dans sa propre fenêtre (Options)
-function modaleGithub(suite) {
-  ouvrirModale(`<div class="fc-tete"><h2>Connexion à GitHub</h2>
-      <button class="btn btn-discret btn-icone" id="gh-fermer" aria-label="Fermer">${ico("fermer")}</button></div>
-    <div id="gh-zone"></div>`, (b) => {
-    $("#gh-fermer", b).onclick = fermerModale;
-    connexionGithub($("#gh-zone", b), (compte) => { fermerModale(); suite(compte); });
+// ------------------------------------------------------------------ sauvegarde en ligne (synchro.py)
+// une fenêtre, trois portes : sauvegarder (bandeau de l'accueil, Options), récupérer (accueil vide d'un nouveau PC).
+// Chacune mène, si besoin, à la présentation de GitHub puis à la connexion ; fin() est appelé une fois tout fini
+function modaleSauvegarde(contexte, fin = () => {}) {
+  const titre = contexte === "recuperer" ? "Récupérer mes decks" : "Sauvegarder mes decks en ligne";
+  ouvrirModale(`<div class="fc-tete"><h2>${titre}</h2>
+      <button class="btn btn-discret btn-icone" id="sv-fermer" aria-label="Fermer">${ico("fermer")}</button></div>
+    <div id="sv-zone"><p class="chargement">Chargement…</p></div>`, async (b) => {
+    $("#sv-fermer", b).onclick = () => { fermerModale(); fin(); };
+    const zone = $("#sv-zone", b);
+    const fini = () => { fermerModale(); fin(); };
+    const apres = () => (contexte === "recuperer" ? recupererDecks(zone, fini) : activerSauvegarde(zone, fini));
+    const g = await api("/api/github").catch(() => ({}));
+    if (g.compte && g.prive) apres();
+    else if (g.compte) autoriserGithub(zone, apres);
+    else introGithub(zone, apres, contexte === "recuperer" ? "recuperer" : "sauvegarde");
   }, { focus: false });
+}
+
+// un échec : se reconnecter s'il le faut (401 : plus connecté ; 409 : connexion d'avant la sauvegarde), sinon réessayer
+function echecSauvegarde(zone, e, refaire, contexte) {
+  if (e.statut === 409) return autoriserGithub(zone, refaire);
+  if (e.statut === 401) return introGithub(zone, refaire, contexte);
+  zone.innerHTML = `<p class="erreur">${esc(e.message)}</p>
+    <div class="boutons"><button class="btn btn-accent" id="sv-encore">Réessayer</button></div>`;
+  $("#sv-encore", zone).onclick = refaire;
+}
+
+async function activerSauvegarde(zone, fin) {
+  zone.innerHTML = `<p class="chargement">Sauvegarde de tes decks…</p>`;
+  let r;
+  try { r = await api("/api/sauvegarde", { method: "POST", body: { action: "activer" } }); }
+  catch (e) { return echecSauvegarde(zone, e, () => activerSauvegarde(zone, fin), "sauvegarde"); }
+  const n = r.resume.decks || 0;
+  zone.innerHTML = `<p class="sv-ok">${ico("nuage")}<span><strong>${n > 1 ? `Tes ${n} decks sont sauvegardés.` : n ? "Ton deck est sauvegardé." : "La sauvegarde est prête."}</strong>
+      Ensuite, chaque modification est sauvegardée toute seule.</span></p>
+    <p class="muet petit">Sur un autre PC : installe l'Atelier, puis «&nbsp;Récupérer mes decks&nbsp;» sur sa page d'accueil.</p>
+    <div class="boutons">${r.etat.url ? `<a class="btn" href="${esc(r.etat.url)}" target="_blank" rel="noopener">${ico("ouvrir")}Voir sur GitHub</a>` : ""}
+      <button class="btn btn-accent" id="sv-fin">OK</button></div>`;
+  $("#sv-fin", zone).onclick = fin;
+}
+
+async function recupererDecks(zone, fin) {
+  zone.innerHTML = `<p class="chargement">Recherche de ta sauvegarde…</p>`;
+  let s, g;
+  try { [s, g] = await Promise.all([api("/api/sauvegarde/distante"), api("/api/github")]); }
+  catch (e) { return echecSauvegarde(zone, e, () => recupererDecks(zone, fin), "recuperer"); }
+  if (!s.existe) {
+    zone.innerHTML = `<p>Aucune sauvegarde de decks sur le compte GitHub <strong>${esc(g.compte)}</strong>.</p>
+      <p class="muet petit">Elle se crée depuis ton autre PC : bandeau «&nbsp;Les sauvegarder en ligne&nbsp;» de sa page d'accueil, ou Options.</p>
+      <div class="boutons"><button class="btn btn-accent" id="sv-fin">OK</button></div>`;
+    $("#sv-fin", zone).onclick = fin;
+    return;
+  }
+  const quand = new Date(s.date).toLocaleString("fr-FR", { dateStyle: "long", timeStyle: "short" });
+  zone.innerHTML = `<p>La sauvegarde du compte <strong>${esc(g.compte)}</strong> contient ${s.decks.length > 1 ? `${s.decks.length} decks` : "1 deck"},
+      modifiée le ${esc(quand)} :</p>
+    <p class="sv-decks">${s.decks.map((n) => `<strong>${esc(n)}</strong>`).join(" · ")}</p>
+    <div class="boutons"><button class="btn btn-accent" id="sv-go">${ico("telecharger")}Récupérer sur ce PC</button></div>`;
+  $("#sv-go", zone).onclick = async () => {
+    zone.innerHTML = `<p class="chargement">Récupération de tes decks…</p>`;
+    try {
+      const r = await api("/api/sauvegarde/recuperer", { method: "POST", body: {} });
+      const n = r.resume.decks_recus ? r.resume.decks_recus.length : 0;
+      toast(n > 1 ? `${n} decks récupérés.` : n ? "1 deck récupéré." : "Tes decks sont à jour.");
+      etat.decks = [];
+      fin();
+    } catch (e) { echecSauvegarde(zone, e, () => recupererDecks(zone, fin), "recuperer"); }
+  };
+}
+
+// accueil : où en est la sauvegarde (un mot discret), ou un bandeau tant que les decks ne sont que sur ce PC
+const PLUS_TARD_SAUVEGARDE = 7 * 86400 * 1000;
+async function etatSauvegarde(petit, bandeau) {
+  const s = await api("/api/sauvegarde").catch(() => null);
+  if (!s || !petit.isConnected) return;
+  if (s.active) {
+    const quand = s.derniere ? `Dernière sauvegarde : ${heureCourte(s.derniere)}` : "";
+    petit.innerHTML = `<a class="etat-sauvegarde ${s.erreur ? "en-echec" : ""}" href="#/options" title="${esc(s.erreur || quand)}">${ico("nuage")}${s.erreur ? "Sauvegarde en échec" : "Sauvegardé"}</a>`;
+    bandeau.innerHTML = "";
+    return;
+  }
+  let tard = 0;
+  try { tard = +localStorage.getItem("pref-sauvegarde-plus-tard") || 0; } catch (_) {}
+  if ((s.connecte && s.prive && !s.voulue) || Date.now() - tard < PLUS_TARD_SAUVEGARDE) return;   // coupée exprès, ou « Plus tard »
+  bandeau.innerHTML = `<div class="bandeau-sauvegarde">${ico("nuage")}<p>Tes decks ne sont que sur ce PC : si tu le changes ou s'il tombe en panne, ils sont perdus.</p>
+    <button class="btn btn-accent btn-petit" id="bs-oui">Les sauvegarder en ligne</button>
+    <button class="btn btn-discret btn-petit" id="bs-tard">Plus tard</button></div>`;
+  $("#bs-oui", bandeau).onclick = () => modaleSauvegarde("sauvegarde", () => etatSauvegarde(petit, bandeau));
+  $("#bs-tard", bandeau).onclick = () => { PREF.set("sauvegarde-plus-tard", String(Date.now())); bandeau.innerHTML = ""; };
 }
 
 function modaleRenommer(d) {
@@ -1504,21 +1755,18 @@ function modaleRenommer(d) {
   $("#rn-nom").select();
 }
 
-// ce que le navigateur retient d'un deck (dernière recherche, partie de « Jouer ») suit son nouveau nom
+// ce que le navigateur retient d'un deck (partie de « Jouer ») suit son nouveau nom
 function renommerPrefs(ancien, nouveau) {
   try {
-    for (const k of Object.keys(localStorage)) {
-      let v = localStorage.getItem(k);
-      const k2 = k === "pref-" + cleDerniere(ancien) ? "pref-" + cleDerniere(nouveau) : k === "partie-" + ancien ? "partie-" + nouveau : k;
-      if (k.startsWith("pref-rch-derniere")) {
-        const p = new URLSearchParams(v);
-        if (p.get("deck") === ancien) { p.set("deck", nouveau); v = p.toString(); }
-      }
-      if (k2 !== k) localStorage.removeItem(k);
-      localStorage.setItem(k2, v);
-    }
+    const v = localStorage.getItem("partie-" + ancien);
+    if (v === null) return;
+    localStorage.removeItem("partie-" + ancien);
+    localStorage.setItem("partie-" + nouveau, v);
   } catch (_) {}
 }
+
+// les recherches de cartes ne sont plus retenues (version 1.7.5) : celles gardées avant s'effacent
+try { for (const k of Object.keys(localStorage)) if (k.startsWith("pref-rch-derniere")) localStorage.removeItem(k); } catch (_) {}
 
 // ------------------------------------------------------------------ options : réglages de ce PC (reglages.json), démarrage, classeur
 // Options : trois blocs (les cartes, le partage, le programme), puis le classeur
@@ -1567,9 +1815,11 @@ function optionsGenerales(el, o) {
   el.innerHTML = bloc("cartes", "Cartes", `
       <label class="opt-champ"><span>Budget par carte</span><span class="opt-euros"><input class="champ" name="budget" inputmode="decimal" value="${budget(o.budget)}" placeholder="${budget(o.budget_defaut)}">€</span></label>
       ${champVisuel(o)}${basculesUB(o)}`)
-    + bloc("partager", "Partage", `
-      <label class="opt-champ"><span>Nom affiché</span><input class="champ" name="nom" maxlength="60" value="${esc(o.nom)}" placeholder="${esc(o.github)}"></label>
-      <div id="opt-github"></div>`)
+    + bloc("nuage", "Sauvegarde et partage", `
+      <p class="opt-explication">L'Atelier tourne sur ton PC. Avec un compte GitHub, gratuit, il sauvegarde tes decks
+        dans un espace privé et publie ceux que tu partages.</p>
+      <div id="opt-github"></div>
+      <label class="opt-champ"><span>Nom sur les pages partagées</span><input class="champ" name="nom" maxlength="60" value="${esc(o.nom)}" placeholder="${esc(o.github)}"></label>`)
     + bloc("options", "L'Atelier", `
       ${o.demarrage == null ? "" : bascule("demarrage", o.demarrage, "Lancer au démarrage de Windows")}
       ${champFermeture(o)}
@@ -1601,22 +1851,52 @@ function optionsGenerales(el, o) {
   ligneGithub($("#opt-github", el), o);
 }
 
-// le compte GitHub où vont les decks partagés : connecté par code (github.py), ou celui du partage avec git (reglages.json)
+// le compte GitHub (connecté par code, github.py ; ou celui du partage avec git, reglages.json) et la sauvegarde en ligne
 async function ligneGithub(el, o) {
-  const g = await api("/api/github").catch(() => ({}));
+  const [g, s] = await Promise.all([api("/api/github").catch(() => ({})), api("/api/sauvegarde").catch(() => ({}))]);
   const nom = $('[name="nom"]');
   if (nom) nom.placeholder = g.compte || o.github || "";
-  if (g.git && !g.compte) {
-    el.innerHTML = `<label class="opt-champ"><span>Compte GitHub</span><input class="champ" name="github" maxlength="39" value="${esc(o.github)}" autocomplete="off" spellcheck="false"></label>`;
-    return;
-  }
-  el.innerHTML = `<div class="opt-champ"><span>Hébergement des pages</span><span class="opt-github">${g.compte
-    ? `<strong>${esc(g.compte)}</strong><button type="button" class="btn btn-petit btn-discret" id="gh-deconnecter">Se déconnecter</button>`
-    : `<button type="button" class="btn btn-accent btn-petit" id="gh-options">Se connecter à GitHub</button>`}</span></div>`;
-  if (g.compte) $("#gh-deconnecter", el).onclick = async () => {
-    try { await api("/api/github/deconnexion", { method: "POST", body: {} }); ligneGithub(el, o); } catch (e) { erreur(e); }
+  const encore = () => ligneGithub(el, o);
+  const compte = g.git && !g.compte
+    ? `<label class="opt-champ"><span>Compte GitHub des pages</span><input class="champ" name="github" maxlength="39" value="${esc(o.github)}" autocomplete="off" spellcheck="false"></label>`
+    : `<div class="opt-champ"><span>Compte GitHub</span><span class="opt-github">${g.compte
+      ? `<strong>${esc(g.compte)}</strong><button type="button" class="btn btn-petit btn-discret" id="gh-deconnecter">Se déconnecter</button>`
+      : `<button type="button" class="btn btn-accent btn-petit" id="gh-options">Se connecter à GitHub</button>`}</span></div>`;
+  // la sauvegarde : son interrupteur et où elle en est ; sans connexion (ou d'avant la sauvegarde), le bouton qui la met en place
+  const etatTexte = s.erreur ? `<span class="erreur">${esc(s.erreur)}</span>`
+    : s.en_cours ? "Sauvegarde en cours…" : s.derniere ? `À jour · ${esc(heureCourte(s.derniere))}` : "";
+  // pas connecté : le seul bouton « Se connecter » suffit, la sauvegarde se met en place avec la connexion
+  const sauvegarde = s.active ? `<div>
+      <label class="opt-bascule"><span>Sauvegarde en ligne</span><input type="checkbox" role="switch" id="sv-bascule" checked></label>
+      <div class="opt-sauvegarde petit muet">${etatTexte}
+        <button type="button" class="lien-discret" id="sv-maintenant">Sauvegarder maintenant</button>
+        ${s.url ? `<a href="${esc(s.url)}" target="_blank" rel="noopener">Voir sur GitHub ↗</a>` : ""}</div></div>`
+    : s.connecte && s.prive ? `<label class="opt-bascule"><span>Sauvegarde en ligne</span><input type="checkbox" role="switch" id="sv-bascule"></label>`
+    : s.connecte ? `<div class="opt-champ"><span>Sauvegarde en ligne</span><span><button type="button" class="btn btn-petit" id="sv-activer">${ico("nuage")}Sauvegarder mes decks</button></span></div>`
+    : "";
+  el.innerHTML = compte + sauvegarde;
+  const deco = $("#gh-deconnecter", el), co = $("#gh-options", el);
+  if (deco) deco.onclick = async () => {
+    try { await api("/api/github/deconnexion", { method: "POST", body: {} }); encore(); } catch (e) { erreur(e); }
   };
-  else $("#gh-options", el).onclick = () => modaleGithub(() => ligneGithub(el, o));
+  if (co) co.onclick = () => modaleSauvegarde("sauvegarde", encore);
+  const activer = $("#sv-activer", el);
+  if (activer) activer.onclick = () => modaleSauvegarde("sauvegarde", encore);
+  const b = $("#sv-bascule", el);
+  if (b) b.onchange = async () => {
+    try {
+      if (b.checked) { toast("Sauvegarde…"); await api("/api/sauvegarde", { method: "POST", body: { action: "activer" } }); toast("Decks sauvegardés."); }
+      else await api("/api/sauvegarde", { method: "POST", body: { action: "couper" } });
+    } catch (e) { erreur(e); }
+    encore();
+  };
+  const maintenant = $("#sv-maintenant", el);
+  if (maintenant) maintenant.onclick = async () => {
+    maintenant.disabled = true;
+    try { await api("/api/sauvegarde", { method: "POST", body: { action: "maintenant" } }); toast("Decks sauvegardés."); }
+    catch (e) { erreur(e); }
+    encore();
+  };
 }
 
 // le classeur, présenté comme les résultats de la recherche : en-têtes Coul. · Nom VO · Nom VF · Type · Coût · Qté · Prix
@@ -2344,11 +2624,13 @@ function modaleVersion(c) {
 // ------------------------------------------------------------------ recherche d'une carte (ajout, remplacement, commandant)
 // Liste de résultats avec coût, prix (le plus bas du jour, chargé juste après) et image + prix au survol.
 // surAjout : un bouton + sur chaque suggestion ajoute la carte sans ouvrir sa fiche (renvoie vrai si c'est fait)
+// (surAjout(x, { maybe }) : un second bouton l'ajoute au Maybeboard ; Entrée ajoute la carte en tête de liste au deck)
 function rechercheCarte(zone, { surChoix, surAjout = null, deck = () => etat.deck, placeholder = "Nom de la carte…" }) {
   zone.innerHTML = `<input class="champ" type="search" placeholder="${esc(placeholder)}" autocomplete="off" aria-label="Chercher une carte">
     <div class="resultats" role="listbox"></div>`;
   const champ = $("input", zone), res = $(".resultats", zone);
-  let minuteur, numero = 0, liste = [], actif = -1;
+  let minuteur, numero = 0, liste = [], actif = -1, fait = "", ajoutEnCours = false;
+  const ajoutable = (x) => { const d = deck(); return !(d && d.cartes.some((c) => c.nom === x.nom)) || /\bBasic\b/.test(x.type || ""); };
 
   const legende = (x) => `${x.fr && x.fr !== x.nom ? x.fr + " — " : ""}${x.prix === undefined || (x.prix == null && !x.prixFait) ? "prix en cours…" : x.prix == null ? "prix inconnu" : euros(x.prix)}${x.gc ? " · Game Changer" : ""}`;
   const nomHtml = (x) => `<span class="en">${esc(x.nom)}</span>${x.fr && x.fr !== x.nom ? ` <span class="muet">· ${esc(x.fr)}</span>` : ""}
@@ -2359,12 +2641,14 @@ function rechercheCarte(zone, { surChoix, surAjout = null, deck = () => etat.dec
     const deja = d && d.cartes.some((c) => c.nom === x.nom);
     const hors = d && d.identite && (x.couleurs || []).some((k) => !d.identite.includes(k));
     const cher = (x.prix || 0) > BUDGET;
-    const plus = !surAjout ? "" : deja && !/\bBasic\b/.test(x.type || "") ? `<span class="res-plus"></span>`
-      : `<button type="button" class="res-plus" data-plus="${i}" title="Ajouter au deck" aria-label="Ajouter ${esc(x.nom)} au deck">${ico("plus")}</button>`;
+    const plus = !surAjout ? "" : !ajoutable(x) ? `<span class="res-plus"></span><span class="res-plus"></span>`
+      : `<button type="button" class="res-plus" data-plus="${i}" data-dest="maybe" title="Ajouter au Maybeboard" aria-label="Ajouter ${esc(x.nom)} au Maybeboard">${ico("maybe")}</button>
+        <button type="button" class="res-plus" data-plus="${i}" title="Ajouter au deck" aria-label="Ajouter ${esc(x.nom)} au deck">${ico("plus")}</button>`;
+    const legalite = x.legal === "banned" ? `<span class="badge badge-alerte">interdite</span>` : x.legal === "not_legal" ? `<span class="badge badge-alerte">non légale</span>` : "";
     return `<div class="res-ligne"><button type="button" class="res-carte ${i === actif ? "choisi" : ""}" data-i="${i}" role="option"
         data-image="${esc(x.image)}" data-legende="${esc(legende(x))}" ${cher ? 'data-cher="1"' : ""}>
       <span class="res-nom">${nomHtml(x)}</span>
-      <span class="res-badges">${x.gc ? `<span class="badge badge-gc">Game Changer</span>` : ""}${x.legal === "banned" ? `<span class="badge badge-alerte">interdite</span>` : ""}${hors ? `<span class="badge badge-alerte">hors couleurs</span>` : ""}${deja ? `<span class="badge">déjà dans le deck</span>` : ""}</span>
+      <span class="res-badges">${x.gc ? `<span class="badge badge-gc">Game Changer</span>` : ""}${legalite}${hors ? `<span class="badge badge-alerte">hors couleurs</span>` : ""}${deja ? `<span class="badge">déjà dans le deck</span>` : ""}</span>
       ${mana(x.cout)}
       <span class="prix ${cher ? "cher" : ""}">${prixHtml(x)}</span>
     </button>${plus}</div>`;
@@ -2387,49 +2671,54 @@ function rechercheCarte(zone, { surChoix, surAjout = null, deck = () => etat.dec
     });
     if (survol && res.contains(survol)) majLegende();
   };
+  // les anciens résultats restent affichés pendant que les nouveaux arrivent ; les prix manquants suivent sans bloquer
   const chercher = async (q) => {
     const k = ++numero;
-    if (q.trim().length < 2) { liste = []; res.innerHTML = ""; return; }
-    res.innerHTML = `<span class="muet petit">Recherche…</span>`;
+    if (q.trim().length < 2) { liste = []; fait = q; res.innerHTML = ""; return; }
+    if (!liste.length) res.innerHTML = `<span class="muet petit">Recherche…</span>`;
     try {
       const r = await api("/api/chercher?q=" + enc(q));
       if (k !== numero) return;
       liste = r;
+      fait = q;
       actif = r.length ? 0 : -1;
       res.innerHTML = r.length ? r.map(ligne).join("") : `<span class="muet petit">Aucune carte trouvée.</span>`;
       for (const x of r) if (x.prix != null) x.prixFait = true;
-      const manque = r.filter((x) => x.prix == null || !x.fr).map((x) => x.nom);
-      if (manque.length) {
-        const p = await api("/api/prix", { method: "POST", body: { noms: manque } });
-        if (k === numero) majPrix(p);
-      }
+      const manque = r.filter((x) => x.prix == null || x.fr == null).map((x) => x.nom);
+      if (manque.length) api("/api/prix", { method: "POST", body: { noms: manque } }).then((p) => { if (k === numero) majPrix(p); }).catch(() => {});
     } catch (e) { if (k === numero) res.innerHTML = `<span class="erreur">${esc(e.message)}</span>`; }
   };
   const marque = () => $$(".res-carte", res).forEach((el, j) => el.classList.toggle("choisi", j === actif));
   const choisir = (i) => { if (!liste[i]) return; actif = i; marque(); surChoix(liste[i]); };
+  const ajouter = async (i, maybe = false, bouton = null) => {
+    if (ajoutEnCours || !liste[i]) return;
+    ajoutEnCours = true;
+    if (bouton) bouton.disabled = true;
+    try {
+      if (await surAjout(liste[i], { maybe })) vider();             // carte ajoutée : le champ est prêt pour la suivante
+      else { if (bouton) bouton.disabled = false; champ.focus(); }
+    } finally { ajoutEnCours = false; }
+  };
 
-  champ.addEventListener("input", () => { clearTimeout(minuteur); minuteur = setTimeout(() => chercher(champ.value), 300); });
-  champ.addEventListener("keydown", (ev) => {
-    if (!liste.length) return;
-    if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
+  champ.addEventListener("input", () => { clearTimeout(minuteur); minuteur = setTimeout(() => chercher(champ.value), 120); });
+  champ.addEventListener("keydown", async (ev) => {
+    if (ev.key === "Enter") {
+      ev.preventDefault();
+      if (champ.value !== fait) { clearTimeout(minuteur); await chercher(champ.value); }      // Entrée tapée avant les résultats
+      if (!liste.length) return;
+      const i = Math.max(0, actif);
+      if (surAjout && ajoutable(liste[i])) ajouter(i); else choisir(i);
+    } else if ((ev.key === "ArrowDown" || ev.key === "ArrowUp") && liste.length) {
       ev.preventDefault();
       actif = (actif + (ev.key === "ArrowDown" ? 1 : -1) + liste.length) % liste.length;
       marque();
       $$(".res-carte", res)[actif]?.scrollIntoView({ block: "nearest" });
-    } else if (ev.key === "Enter") {
-      ev.preventDefault();
-      choisir(Math.max(0, actif));
     }
   });
-  const vider = () => { numero++; clearTimeout(minuteur); champ.value = ""; liste = []; actif = -1; res.innerHTML = ""; champ.focus(); };
+  const vider = () => { numero++; clearTimeout(minuteur); champ.value = ""; fait = ""; liste = []; actif = -1; res.innerHTML = ""; champ.focus(); };
   res.addEventListener("click", async (ev) => {
     const p = ev.target.closest("button.res-plus");
-    if (p) {
-      p.disabled = true;
-      if (await surAjout(liste[+p.dataset.plus])) vider();         // carte ajoutée : le champ est prêt pour la suivante
-      else { p.disabled = false; champ.focus(); }
-      return;
-    }
+    if (p) return ajouter(+p.dataset.plus, p.dataset.dest === "maybe", p);
     const b = ev.target.closest(".res-carte");
     if (b) choisir(+b.dataset.i);
   });
@@ -2491,59 +2780,64 @@ function modaleAjout() {
         <input class="champ" style="flex:1;min-width:180px" id="cat-ajout" list="liste-cat" placeholder="Ramp, Draw…" value="${esc(etat.dernierTags || "")}">
         ${optionsCategories()}
         <label class="petit">Quantité <input class="champ" type="number" id="qte-ajout" min="1" max="99" value="1" style="width:4.5rem"></label>
-        <label class="petit"><input type="checkbox" id="maybe" ${etat.dernierMaybe ? "checked" : ""}> Maybeboard</label>
       </div>
     </div>
     <div id="journal" class="journal petit"></div>
-    <div class="boutons"><button class="btn" id="fermer">Fermer</button><button class="btn btn-accent" id="ok" disabled>${ico("plus")}<span>Ajouter au deck</span></button></div>`, (b) => {
+    <div class="boutons"><button class="btn" id="fermer">Fermer</button>
+      <button class="btn" id="ok-maybe" disabled>${ico("maybe")}Maybeboard</button>
+      <button class="btn btn-accent" id="ok" disabled>${ico("plus")}<span>Ajouter au deck</span></button></div>`, (b) => {
     let choix = null;
-    const ajouter = async (nom, edition) => {
+    // la fiche affichée : les deux boutons du bas l'ajoutent (au deck ou au Maybeboard) ; sans fiche, ils attendent
+    const boutonsFiche = (actifs) => {
+      $("#ok", b).disabled = $("#ok-maybe", b).disabled = !actifs;
+      $("#ok span", b).textContent = actifs && choix ? `Ajouter ${choix.nom}` : "Ajouter au deck";
+    };
+    const ajouter = async (nom, edition, maybe = false) => {
       const tags = $("#cat-ajout", b).value.split(",").map((t) => t.trim()).filter(Boolean);
       etat.dernierTags = $("#cat-ajout", b).value;
-      etat.dernierMaybe = $("#maybe", b).checked;
-      if (etat.dernierMaybe) tags.unshift("Maybeboard");
+      if (maybe) tags.unshift("Maybeboard");
       const n = Math.max(1, +$("#qte-ajout", b).value || 1);
       const res = await modifier("ajouter", null, { nom, tags, n, edition }, "");
       if (res) $("#journal", b).insertAdjacentHTML("afterbegin",
-        `<div>✓ ${n > 1 ? n + "× " : ""}${esc(nom)}${etat.dernierMaybe ? " (Maybeboard)" : ""} · ${res.total} cartes</div>`);
+        `<div>✓ ${n > 1 ? n + "× " : ""}${esc(nom)}${maybe ? " (Maybeboard)" : ""} · ${res.total} cartes</div>`);
       return res;
     };
     const rech = rechercheCarte($("#rech", b), {
-      surAjout: async (x) => {
-        const res = await ajouter(x.nom, null);
+      surAjout: async (x, { maybe = false } = {}) => {
+        const res = await ajouter(x.nom, null, maybe);
         if (res) {
           $("#qte-ajout", b).value = 1;
           if (choix && choix.nom === x.nom) {                 // la fiche affichée était celle de cette carte
             choix = null;
             $("#fiche", b).innerHTML = "";
-            $("#ok", b).disabled = true;
-            $("#ok span", b).textContent = "Ajouter au deck";
+            boutonsFiche(false);
           }
         }
         return res;
       },
       surChoix: async (x) => {
         choix = null;
-        $("#ok", b).disabled = true;
+        boutonsFiche(false);
         try {
           choix = await chargerFiche($("#fiche", b), x.nom, { surVersion: (g) => { choix = g; } });
-          $("#ok", b).disabled = false;
-          $("#ok span", b).textContent = `Ajouter ${choix.nom}`;
+          boutonsFiche(true);
           $("#ok", b).focus();
         } catch (e) { $("#fiche", b).innerHTML = `<p class="erreur">${esc(e.message)}</p>`; }
       },
     });
     $("#fermer", b).onclick = fermerModale;
-    $("#ok", b).onclick = async () => {
+    const valider = async (maybe) => {
       if (!choix) return;
-      $("#ok", b).disabled = true;
-      if (!await ajouter(choix.nom, editionVersion(choix.version))) { $("#ok", b).disabled = false; return; }
+      boutonsFiche(false);
+      if (!await ajouter(choix.nom, editionVersion(choix.version), maybe)) { boutonsFiche(true); return; }
       choix = null;
       $("#fiche", b).innerHTML = "";
       $("#qte-ajout", b).value = 1;
-      $("#ok span", b).textContent = "Ajouter au deck";
+      boutonsFiche(false);
       rech.vider();
     };
+    $("#ok", b).onclick = () => valider(false);
+    $("#ok-maybe", b).onclick = () => valider(true);
   });
 }
 
@@ -3500,7 +3794,6 @@ function critVersHash(c) {
   return p.toString();
 }
 
-const cleDerniere = (deck) => "rch-derniere" + (deck ? ":" + deck : "");
 
 // ---- fenêtres du formulaire
 // couleurs : un clic = « peut » (permise), un second = « doit » (la carte doit l'avoir), un troisième = retirée ;
@@ -3768,18 +4061,7 @@ function resumeCrit(c) {
 
 // ---- la page
 async function vueRecherche(params) {
-  // lien du haut, sans critère : le formulaire avec les critères de la dernière recherche sans deck. Bouton « Chercher
-  // des cartes » d'un deck : un formulaire vierge, aux couleurs du deck (une ancienne recherche pourrait en sortir)
-  if (![...params.keys()].length) {
-    let derniere = new URLSearchParams(PREF.get(cleDerniere(""), ""));
-    if (derniere.get("deck")) derniere = new URLSearchParams();
-    derniere.delete("r");                          // le formulaire, prérempli, sans relancer la recherche
-    derniere.delete("page");
-    if ([...derniere.keys()].length) {
-      history.replaceState(null, "", "#/recherche?" + derniere);
-      params = derniere;
-    }
-  }
+  // lien du haut : un formulaire vierge. Bouton « Chercher pour ce deck » : vierge aussi, aux couleurs du deck
   const neuve = [...params.keys()].every((k) => k === "deck");
   scrollTo(0, 0);
   const c = critDepuis(params);
@@ -3881,13 +4163,13 @@ const MODULES_BASES = [
 ];
 // « Ce qui fait la différence » : ce que les autres outils n'ont pas, du plus marquant au moins marquant
 const MODULES_ATOUTS = [
-  ["simulateur", "Simulateur de parties", "En un clic, le simulateur joue un millier de parties à quatre joueurs et dit si votre deck est régulier : le mana arrive-t-il à l'heure, jouez-vous vos cartes, tenez-vous votre board, gérez-vous celui des adversaires, quand arrive votre commandant. Il indique combien de vos cartes il comprend, et vous pouvez comparer deux versions d'un même deck. Avec Claude, il va plus loin : Claude lui apprend les cartes qu'il lit mal, rejoue et vous explique le résultat, taux de victoire compris."],
+  ["simulateur", "Simulateur de parties", "En un clic, simulez 1 000 parties à quatre joueurs pour tester la régularité de votre deck (mana, présence sur table, gestion, sortie du commandant). Comparez deux versions d'une même liste pour mesurer vos changements. Avec Claude, le simulateur apprend les cartes complexes, rejoue et vous détaille ses résultats."],
   ["bracket", "Bracket", "Le bracket est estimé automatiquement selon les règles officielles : Game Changers, combos infinies à deux cartes, tuteurs… et comparé à l'estimation de Commander Spellbook."],
   ["statistiques", "Statistiques et base de mana", "Courbe de mana, types, fonctions des cartes et surtout la répartition des sources de couleur : elle compte les terrains et les cartes de ramp, et dit si chaque couleur est confortable."],
-  ["suggestions", "Suggestions de cartes", "Des cartes proposées pour votre deck, d'après son commandant et les cartes déjà dedans : celles qui suivent ses thèmes, celles qui complètent une combo, explication comprise, et celles qui attendent dans votre classeur. Toujours dans vos couleurs et votre budget, triées par intérêt, avec des filtres par type, fonction, coût et prix. Le calcul se fait sans IA."],
-  ["budget", "Prix Cardmarket et budget", "Le prix indicatif Cardmarket du jour pour chaque carte et chaque deck, avec une alerte au-delà de votre budget par carte. Les cartes qui vous manquent se copient au format des listes de souhaits de Cardmarket : collez-les sur le site, il calcule le panier."],
+  ["suggestions", "Suggestions de cartes", "Des recommandations ciblées selon votre commandant, vos combos et votre classeur. Triées par pertinence, adaptées à vos couleurs et à votre budget, avec filtres par type, coût et prix."],
+  ["budget", "Prix Cardmarket et budget", "Les prix Cardmarket pour vos cartes et vos decks, avec alerte en cas de dépassement de budget. Exportez les cartes manquantes au format liste de souhaits Cardmarket en un clic pour calculer directement votre panier."],
   ["combos", "Combos", "Les combos du deck sont repérées automatiquement, en croisant plusieurs sources : MTGPics (la base de Magic-Ville) et Commander Spellbook."],
-  ["discussion", "Discussion avec Claude", "Facultative, à droite de l'écran : Claude voit vos decks et tout ce que montre l'Atelier (statistiques, suggestions, combos, bracket, classeur), et s'appuie sur des repères de construction reconnus. Il aide à catégoriser les cartes, faire un cut, chercher des idées ou vérifier une interaction. Aucune clé d'API à créer : elle passe par Claude Code et votre abonnement Claude payant (Pro ou plus), dont elle consomme simplement l'usage normal."],
+  ["discussion", "Discussion avec Claude (optionnel)", "Un copilote optionnel qui a accès à tout votre Atelier (decks, stats, combos, classeur). Il vous aide à faire vos cuts, explorer des synergies ou vérifier des règles complexes. Aucune clé d'API à configurer : il utilise directement votre abonnement Claude payant (Pro ou supérieur)."],
 ];
 // les questions des visiteurs (joueurs experts, débutants, non-informaticiens), repliées ; une réponse en HTML commence par « < »
 const FAQ_ATELIER = [
@@ -3910,6 +4192,8 @@ const FAQ_ATELIER = [
       "On colle une liste copiée depuis Moxfield, Archidekt ou MTG Arena. La liste d'un deck préconstruit se trouve sur ces sites. Les cartes rangées hors des decks se collent de la même façon dans le classeur."],
     ["Et sur mon téléphone ?",
       `<p>L'Atelier s'ouvre sur le PC. Pour emporter un deck, « Partager » le publie en ligne, sur une page <a href="${EXEMPLES_ATELIER}">comme celles-ci</a> : elle se lit sur téléphone et se met à jour toute seule quand le deck change. Il faut un compte GitHub, gratuit : c'est lui qui héberge votre page.</p>`],
+    ["Et si mon PC tombe en panne ?",
+      "Activez la sauvegarde en ligne, facultative : l'Atelier range une copie de vos decks, de leurs versions et de votre classeur sur votre propre compte GitHub, gratuit, dans un espace privé que vous seul voyez. Chaque modification s'y ajoute toute seule. Sur un autre PC, « Récupérer mes decks » les ramène."],
     ["Puis-je partir avec mes decks ?",
       "Oui. Chaque deck est un dossier sur votre disque, avec sa liste en texte (format Archidekt, tags compris), son historique et ses versions. Le menu « … » copie la liste pour Archidekt, Moxfield, MTG Arena ou MTGO."],
   ]],
@@ -3964,7 +4248,7 @@ function vueAPropos(installation = false) {
         </div>
         <div class="ap-tete-texte">
           <h1>L'Atelier <span>MTG</span></h1>
-          <p class="ap-accroche">Vos decks Commander,<br>de la liste à la table.</p>
+          <p class="ap-accroche">Le deckbuilding Commander assisté,<br>100% local et sans compte.</p>
           <ul class="ap-puces">${["Suggestions", "Base de mana", "Combos", "Bracket", "Simulation", "Table de jeu", "Recherche avancée", "Claude"].map((x) => `<li>${x}</li>`).join("")}</ul>
           <p class="ap-cta"><a class="btn btn-accent" href="${INSTALLER}" id="ap-installer">${ico("telecharger")}Installer l'Atelier MTG</a>
             <a class="btn" href="${EXEMPLES_ATELIER}">${ico("partager")}Voir des decks partagés</a></p>
@@ -3973,10 +4257,11 @@ function vueAPropos(installation = false) {
       </div>
     </header>
     <article class="a-propos">
-      <p class="chapeau">Le gestionnaire de decks Commander local, sans compte et taillé pour le deckbuilding assisté.</p>
-      <p>L'Atelier est une application locale, qui s'ouvre dans votre navigateur, pensée pour concevoir, tester et faire évoluer
-        des decks Magic: The Gathering en Commander. Pas de publicité, aucun compte en ligne, pas de données hébergées sur un
-        serveur distant : tout s'exécute directement sur votre ordinateur.</p>
+      <div class="ap-bandeau">
+        <p class="ap-promesse">Zéro pub, zéro compte, zéro cloud : l'Atelier tourne <em>uniquement sur votre PC</em>.</p>
+        <p>L'Atelier est une application locale, qui s'ouvre dans votre navigateur, pensée pour concevoir, tester et faire
+          évoluer des decks Magic: The Gathering en Commander.</p>
+      </div>
 
       <h2>Les bases : un outil complet</h2>
       ${modules(MODULES_BASES)}
@@ -3994,10 +4279,10 @@ function vueAPropos(installation = false) {
       <ul class="ap-principes">
         <li><strong>Open source et gratuit.</strong> Le code est publié sous <a href="${depot}/blob/main/LICENSE" target="_blank" rel="noopener">licence MIT</a> :
           accessible, vérifiable et modifiable par tous sur GitHub.</li>
-        <li><strong>Données souveraines.</strong> Vos decks restent sur votre disque dur et rien n'est collecté. Seules sortent les
+        <li><strong>Vos decks sont stockés sur votre PC.</strong> Rien n'est collecté. Seules sortent les
           requêtes nécessaires : données, images et prix des cartes (Scryfall), combos et bracket (Commander Spellbook, MTGPics),
           la discussion avec Claude si vous l'utilisez, et les pages que vous choisissez de partager.</li>
-        <li><strong>IA strictement modulaire.</strong> Tri, statistiques, suggestions, test du simulateur et jeu en solo
+        <li><strong>L'IA est optionnelle.</strong> Tri, statistiques, suggestions, test du simulateur et jeu en solo
           fonctionnent sans aucune configuration IA.</li>
       </ul>
 
@@ -4065,8 +4350,8 @@ python installer.py</code><button type="button" data-copier>Copier</button></div
         <li><strong>Cardmarket</strong> pour les cotations du jour ;</li>
         <li><strong>les règles officielles</strong> pour le contrôle direct des cartes interdites, des brackets et des Game Changers.</li>
       </ul>
-      <p>L'Atelier est né de cette synthèse : une interface locale fluide pour gérer ses cartes, connectable à la demande à un
-        assistant IA pour auditer un deck, automatiser le classement ou affiner les simulations.</p>
+      <p>J'ai donc créé l'Atelier pour réunir tout ça : une vraie interface sur PC pour construire vos decks, avec la
+        possibilité d'appeler l'IA en renfort si besoin.</p>
     </article>`;
   $$(".ap-tete img[data-f], .a-propos img[data-f]").forEach((img) => {
     img.onerror = () => {                       // dans l'Atelier : la capture de ce PC, sinon celle du site de l'auteur
@@ -4339,14 +4624,9 @@ async function lancerRecherche() {
   }
   if (k !== rch.numero) return;
   rch.res = r;
-  memoriser();
   rendreResultats(z, r);
 }
 
-// la dernière recherche sans deck, que rouvre le lien du haut
-function memoriser() {
-  if (!rch.crit.deck) PREF.set(cleDerniere(""), critVersHash(rch.crit));
-}
 
 async function attendreBase(z) {
   const k = rch.numero;
@@ -4409,7 +4689,6 @@ function rendreResultats(z, r) {
   $$("[data-vue]", z).forEach((b) => b.addEventListener("click", () => {
     rch.crit.vue = b.dataset.vue === "images" ? "images" : "";
     history.replaceState(null, "", "#/recherche?" + critVersHash(rch.crit));
-    memoriser();
     rendreResultats(z, r);
   }));
   $("#rch-tri", z).onchange = (ev) => { location.hash = "#/recherche?" + critVersHash({ ...rch.crit, ordre: ev.target.value, sens: "", page: "" }); };
