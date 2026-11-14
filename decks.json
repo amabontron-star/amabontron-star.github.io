@@ -1,7 +1,7 @@
 {
  "Deck Tétali": {
   "slug": "tetali",
-  "date": 1794555329.0014963,
+  "date": 1794643217.1820118,
   "version": "1.7.6",
   "resume": {
    "alertes": {},
@@ -23,7 +23,7 @@
    "maybe": 5,
    "modifie": 1794431989.055171,
    "note": "",
-   "prix_total": 230.14,
+   "prix_total": 229.98,
    "titre": "Tétali",
    "total": 100,
    "trop_cher": [
